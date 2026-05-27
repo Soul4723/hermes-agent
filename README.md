@@ -33,7 +33,7 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), [Open
 ### Linux, macOS, WSL2, Termux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Soul4723/hermes-agent/main/scripts/install.sh | bash
 ```
 
 ### Windows (native, PowerShell) — Early Beta
@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scri
 Run this in PowerShell:
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1)
+iex (irm https://raw.githubusercontent.com/Soul4723/hermes-agent/main/scripts/install.ps1)
 ```
 
 The installer handles everything: uv, Python 3.11, Node.js, ripgrep, ffmpeg, **and a portable Git Bash** (MinGit, unpacked to `%LOCALAPPDATA%\hermes\git` — no admin required, completely isolated from any system Git install).  Hermes uses this bundled Git Bash to run shell commands.
@@ -60,6 +60,38 @@ After installation:
 source ~/.bashrc    # reload shell (or: source ~/.zshrc)
 hermes              # start chatting!
 ```
+
+### Migrating An Existing Hermes Install To This Fork
+
+Hermes user data lives in `~/.hermes` on Linux/macOS/WSL2. Do not delete or recreate that directory when switching to this fork; it contains `config.yaml`, `.env`, `state.db`, skills, logs, and session history.
+
+For a source checkout install, replace only the installed code and console entry point:
+
+```bash
+cd ~/ai/hermes-agent
+uv venv .venv --python 3.11
+source .venv/bin/activate
+uv pip install -e ".[all,dev]"
+ln -sf "$(pwd)/.venv/bin/hermes" ~/.local/bin/hermes
+```
+
+Then verify the CLI still sees your existing profile:
+
+```bash
+hermes doctor
+hermes sessions list
+```
+
+SkillClaw proxy support is enabled by a `skillclaw:` section in `~/.hermes/config.yaml`; SkillClaw writes that section without replacing the normal Hermes `model:` provider/model settings.
+
+If an older SkillClaw setup already changed your `model:` section to `skillclaw-model`, restore your previous Hermes config backup first:
+
+```bash
+skillclaw restore hermes
+skillclaw start --daemon
+```
+
+The restore keeps `~/.hermes` in place; it only replaces `config.yaml` from SkillClaw's backup.
 
 ---
 
@@ -180,7 +212,7 @@ We welcome contributions! See the [Contributing Guide](https://hermes-agent.nous
 Quick start for contributors — clone and go with `setup-hermes.sh`:
 
 ```bash
-git clone https://github.com/NousResearch/hermes-agent.git
+git clone https://github.com/Soul4723/hermes-agent.git
 cd hermes-agent
 ./setup-hermes.sh     # installs uv, creates venv, installs .[all], symlinks ~/.local/bin/hermes
 ./hermes              # auto-detects the venv, no need to `source` first

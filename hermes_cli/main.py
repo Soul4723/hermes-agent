@@ -6978,6 +6978,20 @@ def _kill_stale_dashboard_processes(
 _warn_stale_dashboard_processes = _kill_stale_dashboard_processes
 
 
+def _github_archive_base_from_remote(remote_url: str) -> Optional[str]:
+    """Return https://github.com/owner/repo for common GitHub remote URL forms."""
+
+    remote = (remote_url or "").strip().rstrip("/")
+    if remote.endswith(".git"):
+        remote = remote[:-4]
+    if remote.startswith("git@github.com:"):
+        path = remote[len("git@github.com:") :]
+        return f"https://github.com/{path}" if "/" in path else None
+    if remote.startswith("https://github.com/"):
+        return remote
+    return None
+
+
 def _update_via_zip(args):
     """Update Hermes Agent by downloading a ZIP archive.
 
@@ -6989,9 +7003,20 @@ def _update_via_zip(args):
     from urllib.request import urlretrieve
 
     branch = "main"
-    zip_url = (
-        f"https://github.com/NousResearch/hermes-agent/archive/refs/heads/{branch}.zip"
-    )
+    archive_base_url = "https://github.com/Soul4723/hermes-agent"
+    git_cmd = ["git", "-c", "windows.appendAtomically=false"] if sys.platform == "win32" else ["git"]
+    try:
+        origin = subprocess.run(
+            git_cmd + ["remote", "get-url", "origin"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if origin.returncode == 0:
+            archive_base_url = _github_archive_base_from_remote(origin.stdout.strip()) or archive_base_url
+    except Exception:
+        pass
+    zip_url = f"{archive_base_url}/archive/refs/heads/{branch}.zip"
 
     print("→ Downloading latest version...")
     tmp_dir = tempfile.mkdtemp(prefix="hermes-update-")
@@ -8758,7 +8783,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 return
             print("✗ Not a git repository. Please reinstall:")
             print(
-                "  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash"
+                "  curl -fsSL https://raw.githubusercontent.com/Soul4723/hermes-agent/main/scripts/install.sh | bash"
             )
             sys.exit(1)
 

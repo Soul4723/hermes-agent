@@ -121,6 +121,86 @@ def test_turn_route_skips_priority_processing_for_unsupported_models():
     assert route["request_overrides"] == {}
 
 
+def test_turn_route_uses_skillclaw_proxy_without_changing_selected_model(monkeypatch):
+    runner = _make_runner()
+    runtime_kwargs = {
+        "api_key": "upstream-key",
+        "base_url": "https://openrouter.ai/api/v1",
+        "provider": "openrouter",
+        "api_mode": "chat_completions",
+        "command": None,
+        "args": [],
+        "credential_pool": None,
+    }
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {
+            "skillclaw": {
+                "enabled": True,
+                "proxy_base_url": "http://127.0.0.1:30000/v1",
+                "proxy_api_key": "skillclaw",
+                "proxy_model": "skillclaw-model",
+            }
+        },
+    )
+
+    route = gateway_run.GatewayRunner._resolve_turn_agent_config(
+        runner,
+        "hi",
+        "openrouter/selected-model",
+        runtime_kwargs,
+    )
+
+    assert route["model"] == "openrouter/selected-model"
+    assert route["runtime"]["base_url"] == "http://127.0.0.1:30000/v1"
+    assert route["runtime"]["api_key"] == "skillclaw"
+    assert route["runtime"]["provider"] == "openrouter"
+    assert route["request_overrides"] == {
+        "extra_headers": {
+            "X-SkillClaw-Upstream-Base-Url": "https://openrouter.ai/api/v1",
+            "X-SkillClaw-Upstream-Model": "openrouter/selected-model",
+            "X-SkillClaw-Upstream-Provider": "openrouter",
+            "X-SkillClaw-Upstream-Api-Mode": "chat_completions",
+            "X-SkillClaw-Upstream-Api-Key": "upstream-key",
+        }
+    }
+
+
+def test_turn_route_does_not_proxy_unsupported_skillclaw_api_mode(monkeypatch):
+    runner = _make_runner()
+    runtime_kwargs = {
+        "api_key": "upstream-key",
+        "base_url": "https://api.anthropic.com",
+        "provider": "anthropic",
+        "api_mode": "anthropic_messages",
+        "command": None,
+        "args": [],
+        "credential_pool": None,
+    }
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {
+            "skillclaw": {
+                "enabled": True,
+                "proxy_base_url": "http://127.0.0.1:30000/v1",
+                "proxy_api_key": "skillclaw",
+                "proxy_model": "skillclaw-model",
+            }
+        },
+    )
+
+    route = gateway_run.GatewayRunner._resolve_turn_agent_config(
+        runner,
+        "hi",
+        "claude-sonnet-4-5",
+        runtime_kwargs,
+    )
+
+    assert route["runtime"]["base_url"] == "https://api.anthropic.com"
+    assert route["runtime"]["api_key"] == "upstream-key"
+    assert route["request_overrides"] == {}
+
+
 @pytest.mark.asyncio
 async def test_handle_fast_command_persists_config(monkeypatch, tmp_path):
     runner = _make_runner()

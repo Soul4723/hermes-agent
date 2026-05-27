@@ -2431,6 +2431,21 @@ class GatewayRunner:
         """
         from hermes_cli.models import resolve_fast_mode_overrides
 
+        def _merge_request_overrides(base: dict | None, extra: dict | None) -> dict:
+            if not base:
+                return dict(extra or {})
+            if not extra:
+                return dict(base)
+            merged = dict(base)
+            for key, value in extra.items():
+                if key == "extra_headers" and isinstance(value, dict):
+                    headers = dict(merged.get("extra_headers") or {})
+                    headers.update(value)
+                    merged["extra_headers"] = headers
+                else:
+                    merged[key] = value
+            return merged
+
         runtime = {
             "api_key": runtime_kwargs.get("api_key"),
             "base_url": runtime_kwargs.get("base_url"),
@@ -2452,17 +2467,62 @@ class GatewayRunner:
                 tuple(runtime["args"]),
             ),
         }
+        request_overrides: dict = {}
+
+        try:
+            from hermes_cli.config import load_config
+
+            skillclaw = (load_config() or {}).get("skillclaw")
+        except Exception:
+            skillclaw = None
+        if isinstance(skillclaw, dict) and skillclaw.get("enabled"):
+            proxy_base_url = str(skillclaw.get("proxy_base_url") or "").strip().rstrip("/")
+            upstream_base_url = str(runtime.get("base_url") or "").strip().rstrip("/")
+            proxy_model = str(skillclaw.get("proxy_model") or "skillclaw-model").strip()
+            api_mode = str(runtime.get("api_mode") or "").strip()
+            if (
+                proxy_base_url
+                and upstream_base_url
+                and upstream_base_url != proxy_base_url
+                and api_mode in {"chat_completions", "codex_responses"}
+            ):
+                headers = {
+                    "X-SkillClaw-Upstream-Base-Url": upstream_base_url,
+                    "X-SkillClaw-Upstream-Model": route["model"],
+                    "X-SkillClaw-Upstream-Provider": str(runtime.get("provider") or ""),
+                    "X-SkillClaw-Upstream-Api-Mode": api_mode,
+                }
+                upstream_api_key = str(runtime.get("api_key") or "").strip()
+                if upstream_api_key:
+                    headers["X-SkillClaw-Upstream-Api-Key"] = upstream_api_key
+
+                proxied_runtime = dict(runtime)
+                proxied_runtime["base_url"] = proxy_base_url
+                proxied_runtime["api_key"] = str(skillclaw.get("proxy_api_key") or "skillclaw")
+                route["runtime"] = proxied_runtime
+                route["signature"] = (
+                    model,
+                    runtime["provider"],
+                    runtime["base_url"],
+                    runtime["api_mode"],
+                    proxy_base_url,
+                    str(skillclaw.get("proxy_api_key") or "skillclaw"),
+                    proxy_model,
+                    runtime["command"],
+                    tuple(runtime["args"]),
+                )
+                request_overrides = {"extra_headers": headers}
 
         service_tier = getattr(self, "_service_tier", None)
         if not service_tier:
-            route["request_overrides"] = {}
+            route["request_overrides"] = request_overrides
             return route
 
         try:
             overrides = resolve_fast_mode_overrides(route["model"])
         except Exception:
             overrides = None
-        route["request_overrides"] = overrides or {}
+        route["request_overrides"] = _merge_request_overrides(request_overrides, overrides)
         return route
 
     async def _handle_adapter_fatal_error(self, adapter: BasePlatformAdapter) -> None:
