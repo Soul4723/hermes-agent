@@ -201,6 +201,42 @@ def test_turn_route_does_not_proxy_unsupported_skillclaw_api_mode(monkeypatch):
     assert route["request_overrides"] == {}
 
 
+def test_turn_route_does_not_proxy_skillclaw_sidecar_mode(monkeypatch):
+    runner = _make_runner()
+    runtime_kwargs = {
+        "api_key": "upstream-key",
+        "base_url": "https://openrouter.ai/api/v1",
+        "provider": "openrouter",
+        "api_mode": "chat_completions",
+        "command": None,
+        "args": [],
+        "credential_pool": None,
+    }
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {
+            "skillclaw": {
+                "enabled": True,
+                "mode": "sidecar",
+                "endpoint": "http://127.0.0.1:30000",
+                "api_key": "skillclaw",
+            }
+        },
+    )
+
+    route = gateway_run.GatewayRunner._resolve_turn_agent_config(
+        runner,
+        "hi",
+        "openrouter/selected-model",
+        runtime_kwargs,
+    )
+
+    assert route["model"] == "openrouter/selected-model"
+    assert route["runtime"]["base_url"] == "https://openrouter.ai/api/v1"
+    assert route["runtime"]["api_key"] == "upstream-key"
+    assert route["request_overrides"] == {}
+
+
 @pytest.mark.asyncio
 async def test_handle_fast_command_persists_config(monkeypatch, tmp_path):
     runner = _make_runner()

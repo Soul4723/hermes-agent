@@ -82,7 +82,7 @@ hermes doctor
 hermes sessions list
 ```
 
-SkillClaw proxy support is enabled by a `skillclaw:` section in `~/.hermes/config.yaml`; SkillClaw writes that section without replacing the normal Hermes `model:` provider/model settings.
+SkillClaw sidecar support is enabled by a `skillclaw:` section in `~/.hermes/config.yaml`; SkillClaw writes that section without replacing the normal Hermes `model:` provider/model settings. Hermes keeps talking to the selected provider directly.
 
 If an older SkillClaw setup already changed your `model:` section to `skillclaw-model`, restore your previous Hermes config backup first:
 

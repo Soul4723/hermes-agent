@@ -55,6 +55,23 @@ def test_skillclaw_proxy_noops_when_disabled():
     assert route["request_overrides"] is None
 
 
+def test_skillclaw_sidecar_does_not_proxy_selected_route():
+    cli = _stub_cli()
+    cli.config["skillclaw"] = {
+        "enabled": True,
+        "mode": "sidecar",
+        "endpoint": "http://127.0.0.1:30000",
+        "api_key": "skillclaw",
+    }
+
+    route = HermesCLI._resolve_turn_agent_config(cli, "hi")
+
+    assert route["model"] == "openrouter/selected-model"
+    assert route["runtime"]["base_url"] == "https://openrouter.ai/api/v1"
+    assert route["runtime"]["api_key"] == "upstream-key"
+    assert route["request_overrides"] is None
+
+
 def test_skillclaw_proxy_noops_for_unsupported_api_mode():
     cli = _stub_cli()
     cli.api_mode = "anthropic_messages"

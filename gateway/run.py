@@ -2476,12 +2476,14 @@ class GatewayRunner:
         except Exception:
             skillclaw = None
         if isinstance(skillclaw, dict) and skillclaw.get("enabled"):
+            skillclaw_mode = str(skillclaw.get("mode") or "proxy").strip().lower()
             proxy_base_url = str(skillclaw.get("proxy_base_url") or "").strip().rstrip("/")
             upstream_base_url = str(runtime.get("base_url") or "").strip().rstrip("/")
             proxy_model = str(skillclaw.get("proxy_model") or "skillclaw-model").strip()
             api_mode = str(runtime.get("api_mode") or "").strip()
             if (
-                proxy_base_url
+                skillclaw_mode != "sidecar"
+                and proxy_base_url
                 and upstream_base_url
                 and upstream_base_url != proxy_base_url
                 and api_mode in {"chat_completions", "codex_responses"}
@@ -16671,6 +16673,33 @@ class GatewayRunner:
                 )
 
             turn_route = self._resolve_turn_agent_config(message, model, runtime_kwargs)
+            sidecar_config = None
+            sidecar_messages = [{"role": "user", "content": message}]
+            sidecar_injected_skills: list[str] = []
+            try:
+                from hermes_cli.config import load_config as _load_hermes_config
+                from hermes_cli.skillclaw_sidecar import (
+                    append_context as _skillclaw_append_context,
+                    fetch_context as _skillclaw_fetch_context,
+                    record_turn as _skillclaw_record_turn,
+                )
+
+                sidecar_config = _load_hermes_config() or {}
+                sidecar_context = _skillclaw_fetch_context(
+                    sidecar_config,
+                    session_id=session_id,
+                    messages=sidecar_messages,
+                    model=turn_route["model"],
+                    provider=str(turn_route["runtime"].get("provider") or ""),
+                    api_mode=str(turn_route["runtime"].get("api_mode") or ""),
+                )
+                sidecar_injected_skills = list(sidecar_context.get("injected_skills") or [])
+                combined_ephemeral = _skillclaw_append_context(
+                    combined_ephemeral or None,
+                    str(sidecar_context.get("context") or ""),
+                ) or ""
+            except Exception:
+                _skillclaw_record_turn = None
 
             # Check agent cache — reuse the AIAgent from the previous message
             # in this session to preserve the frozen system prompt and tool
@@ -16749,6 +16778,7 @@ class GatewayRunner:
             agent.reasoning_config = reasoning_config
             agent.service_tier = self._service_tier
             agent.request_overrides = turn_route.get("request_overrides") or {}
+            agent.ephemeral_system_prompt = combined_ephemeral or None
 
             _bg_review_release = threading.Event()
             _bg_review_pending: list[str] = []
@@ -17155,6 +17185,17 @@ class GatewayRunner:
                     pass
                 reset_current_session_key(_approval_session_token)
             result_holder[0] = result
+            if _skillclaw_record_turn is not None and isinstance(result, dict):
+                _skillclaw_record_turn(
+                    sidecar_config,
+                    session_id=str(result.get("session_id") or session_id),
+                    messages=sidecar_messages,
+                    response={"role": "assistant", "content": result.get("final_response") or ""},
+                    injected_skills=sidecar_injected_skills,
+                    model=turn_route["model"],
+                    provider=str(turn_route["runtime"].get("provider") or ""),
+                    api_mode=str(turn_route["runtime"].get("api_mode") or ""),
+                )
 
             # Signal the stream consumer that the agent is done
             if _stream_consumer is not None:

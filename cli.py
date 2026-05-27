@@ -4801,12 +4801,14 @@ class HermesCLI:
 
         skillclaw = self.config.get("skillclaw") if isinstance(getattr(self, "config", None), dict) else None
         if isinstance(skillclaw, dict) and skillclaw.get("enabled"):
+            skillclaw_mode = str(skillclaw.get("mode") or "proxy").strip().lower()
             proxy_base_url = str(skillclaw.get("proxy_base_url") or "").strip().rstrip("/")
             upstream_base_url = str(runtime.get("base_url") or "").strip().rstrip("/")
             proxy_model = str(skillclaw.get("proxy_model") or "skillclaw-model").strip()
             api_mode = str(runtime.get("api_mode") or "").strip()
             if (
-                proxy_base_url
+                skillclaw_mode != "sidecar"
+                and proxy_base_url
                 and upstream_base_url
                 and upstream_base_url != proxy_base_url
                 and api_mode in {"chat_completions", "codex_responses"}
@@ -11806,6 +11808,32 @@ class HermesCLI:
                 if _srn:
                     agent_message = _srn + "\n\n" + agent_message
                     self._pending_skills_reload_note = None
+                sidecar_messages = list(self.conversation_history[:-1]) + [
+                    {"role": "user", "content": agent_message}
+                ]
+                sidecar_injected_skills = []
+                try:
+                    from hermes_cli.skillclaw_sidecar import (
+                        append_context as _skillclaw_append_context,
+                        fetch_context as _skillclaw_fetch_context,
+                        record_turn as _skillclaw_record_turn,
+                    )
+
+                    sidecar_context = _skillclaw_fetch_context(
+                        self.config,
+                        session_id=self.session_id,
+                        messages=sidecar_messages,
+                        model=turn_route["model"],
+                        provider=str(turn_route["runtime"].get("provider") or ""),
+                        api_mode=str(turn_route["runtime"].get("api_mode") or ""),
+                    )
+                    sidecar_injected_skills = list(sidecar_context.get("injected_skills") or [])
+                    self.agent.ephemeral_system_prompt = _skillclaw_append_context(
+                        self.system_prompt if self.system_prompt else None,
+                        str(sidecar_context.get("context") or ""),
+                    )
+                except Exception:
+                    _skillclaw_record_turn = None
                 try:
                     result = self.agent.run_conversation(
                         user_message=agent_message,
@@ -11826,6 +11854,17 @@ class HermesCLI:
                         "error": _summary,
                     }
                 finally:
+                    if _skillclaw_record_turn is not None and isinstance(result, dict):
+                        _skillclaw_record_turn(
+                            self.config,
+                            session_id=str(result.get("session_id") or self.session_id),
+                            messages=sidecar_messages,
+                            response={"role": "assistant", "content": result.get("final_response") or ""},
+                            injected_skills=sidecar_injected_skills,
+                            model=turn_route["model"],
+                            provider=str(turn_route["runtime"].get("provider") or ""),
+                            api_mode=str(turn_route["runtime"].get("api_mode") or ""),
+                        )
                     # Clear thread-local callbacks so a reused thread doesn't
                     # hold stale references to a disposed CLI instance.
                     try:
@@ -15085,10 +15124,47 @@ def main(
                     # status lines).  The response is printed once below.
                     cli.agent.stream_delta_callback = None
                     cli.agent.tool_gen_callback = None
+                    sidecar_messages = list(cli.conversation_history) + [
+                        {"role": "user", "content": effective_query}
+                    ]
+                    sidecar_injected_skills = []
+                    try:
+                        from hermes_cli.skillclaw_sidecar import (
+                            append_context as _skillclaw_append_context,
+                            fetch_context as _skillclaw_fetch_context,
+                            record_turn as _skillclaw_record_turn,
+                        )
+
+                        sidecar_context = _skillclaw_fetch_context(
+                            cli.config,
+                            session_id=cli.session_id,
+                            messages=sidecar_messages,
+                            model=turn_route["model"],
+                            provider=str(turn_route["runtime"].get("provider") or ""),
+                            api_mode=str(turn_route["runtime"].get("api_mode") or ""),
+                        )
+                        sidecar_injected_skills = list(sidecar_context.get("injected_skills") or [])
+                        cli.agent.ephemeral_system_prompt = _skillclaw_append_context(
+                            cli.system_prompt if cli.system_prompt else None,
+                            str(sidecar_context.get("context") or ""),
+                        )
+                    except Exception:
+                        _skillclaw_record_turn = None
                     result = cli.agent.run_conversation(
                         user_message=effective_query,
                         conversation_history=cli.conversation_history,
                     )
+                    if _skillclaw_record_turn is not None and isinstance(result, dict):
+                        _skillclaw_record_turn(
+                            cli.config,
+                            session_id=str(result.get("session_id") or cli.session_id),
+                            messages=sidecar_messages,
+                            response={"role": "assistant", "content": result.get("final_response") or ""},
+                            injected_skills=sidecar_injected_skills,
+                            model=turn_route["model"],
+                            provider=str(turn_route["runtime"].get("provider") or ""),
+                            api_mode=str(turn_route["runtime"].get("api_mode") or ""),
+                        )
                     # Sync session_id if mid-run compression created a
                     # continuation session. The exit line below reports
                     # session_id to stderr for automation wrappers; without
